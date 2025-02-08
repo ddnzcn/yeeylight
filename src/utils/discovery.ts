@@ -90,7 +90,10 @@ export class Discovery {
           await new Promise<void>((resolve) => {
             socket.bind(
               {
-                address: networkInterface.address,
+                // instead of binding to networkInterface.address
+                // note(ddnzcn): this is a test for my ubuntu box
+                // which cannot see my bulb for some reason.
+                address: "0.0.0.0",
                 port: 0,
               },
               () => {
