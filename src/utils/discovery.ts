@@ -56,81 +56,83 @@ export class Discovery {
       cachedDevices.forEach((device) => devices.set(device.ip, device));
     }
 
-    // Create a socket for each network interface
-    const networkInterfaces = Object.values(os.networkInterfaces()).flat();
+    try {
+      // Create a socket for each network interface
+      const networkInterfaces = Object.values(os.networkInterfaces()).flat();
 
-    for (const networkInterface of networkInterfaces) {
-      // Skip non-IPv4 and internal interfaces
-      if (
-        !networkInterface ||
-        networkInterface.internal ||
-        networkInterface.family !== "IPv4"
-      ) {
-        continue;
-      }
-
-      const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
-      sockets.push(socket);
-
-      socket.on("message", (msg, rinfo) => {
-        const response = msg.toString();
-        if (response.includes("yeelight")) {
-          this.parseResponse(response, devices);
+      for (const networkInterface of networkInterfaces) {
+        if (
+          !networkInterface ||
+          networkInterface.internal ||
+          networkInterface.family !== "IPv4"
+        ) {
+          continue;
         }
-      });
 
-      socket.on("error", (err) => {
-        console.error(
-          `Socket error on interface ${networkInterface.address}:`,
-          err,
-        );
-      });
+        const socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
+        sockets.push(socket);
 
-      try {
-        await new Promise<void>((resolve) => {
-          socket.bind(
-            {
-              address: networkInterface.address,
-              port: 0,
-            },
-            () => {
-              socket.setBroadcast(true);
-              try {
-                socket.addMembership(this.SSDP_ADDR);
-                socket.send(
-                  this.DISCOVERY_MSG,
-                  0,
-                  this.DISCOVERY_MSG.length,
-                  this.SSDP_PORT,
-                  this.SSDP_ADDR,
-                );
-              } catch (err) {
-                console.error(
-                  `Failed to setup multicast on ${networkInterface.address}:`,
-                  err,
-                );
-              }
-              resolve();
-            },
+        socket.on("message", (msg, _rinfo) => {
+          const response = msg.toString();
+          if (response.includes("yeelight")) {
+            this.parseResponse(response, devices);
+          }
+        });
+
+        socket.on("error", (err) => {
+          console.error(
+            `Socket error on interface ${networkInterface.address}:`,
+            err,
           );
         });
-      } catch (err) {
-        console.error(`Failed to bind to ${networkInterface.address}:`, err);
+
+        try {
+          await new Promise<void>((resolve) => {
+            socket.bind(
+              {
+                address: networkInterface.address,
+                port: 0,
+              },
+              () => {
+                socket.setBroadcast(true);
+                try {
+                  socket.addMembership(this.SSDP_ADDR);
+                  socket.send(
+                    this.DISCOVERY_MSG,
+                    0,
+                    this.DISCOVERY_MSG.length,
+                    this.SSDP_PORT,
+                    this.SSDP_ADDR,
+                  );
+                } catch (err) {
+                  console.error(
+                    `Failed to setup multicast on ${networkInterface.address}:`,
+                    err,
+                  );
+                }
+                resolve();
+              },
+            );
+          });
+        } catch (err) {
+          console.error(`Failed to bind to ${networkInterface.address}:`, err);
+        }
       }
+
+      // Wait for responses
+      await new Promise((resolve) => setTimeout(resolve, timeout));
+
+      return Array.from(devices.values());
+    } finally {
+      // Ensure sockets are closed even if an error occurs
+      sockets.forEach((socket) => {
+        try {
+          socket.close();
+        } catch (err) {
+          console.error("Error closing socket:", err);
+        }
+      });
     }
-
-    // Wait for responses
-    await new Promise((resolve) => setTimeout(resolve, timeout));
-
-    // Clean up all sockets
-    sockets.forEach((socket) => socket.close());
-
-    const discoveredDevices = Array.from(devices.values());
-
-    // Update cache with newly discovered devices
-    this.saveCache(discoveredDevices);
-
-    return discoveredDevices;
   }
 
   static async addDeviceManually(deviceInfo: DeviceInfo): Promise<void> {
